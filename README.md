@@ -1,6 +1,6 @@
 # ConfettiEffects
 
-![Confetti Effect](Confetti-Effect.png)
+![Confetti Effect](Confetti-Example.png)
 
 `ConfettiEffects` is a Swift package that adds a reusable SwiftUI confetti effect through a small modifier API.
 
