@@ -52,30 +52,47 @@ extension ConfettiMetalView {
     }
     
     @MainActor
-    fileprivate func makeMTKView(coordinator: Coordinator) -> MTKView {
+    private func makeMTKView(coordinator: Coordinator) -> MTKView {
         let view = MTKView(frame: .zero)
+        #if os(iOS)
         view.isOpaque = false
+        #elseif os(macOS)
+        view.layer?.isOpaque = false
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        #endif
         view.clearColor = MTLClearColorMake(0, 0, 0, 0)
         view.colorPixelFormat = .bgra8Unorm
         view.framebufferOnly = false
+        
+        view.autoResizeDrawable = false
         view.enableSetNeedsDisplay = false
-        view.isPaused = false
         view.preferredFramesPerSecond = 60
         
+        view.isPaused = true
+        
         coordinator.renderer = ConfettiMetalRenderer(mtkView: view)
-        coordinator.renderer?.onActivityChanged = { isActive in
-            view.isPaused = !isActive
+        
+        coordinator.renderer?.onActivityChanged = { [weak view] isActive in
+            view?.isPaused = !isActive
         }
         view.delegate = coordinator.renderer
         return view
     }
     
     @MainActor
-    fileprivate func update(view: MTKView, coordinator: Coordinator) {
+    private func update(view: MTKView, coordinator: Coordinator) {
+        guard size.width > 0, size.height > 0,
+              size.width.isFinite, size.height.isFinite,
+              displayScale > 0, displayScale.isFinite else {
+            view.isPaused = true
+            return
+        }
+        
         view.drawableSize = CGSize(
-            width: max(size.width * displayScale, 1),
-            height: max(size.height * displayScale, 1)
+            width: size.width * displayScale,
+            height: size.height * displayScale
         )
+        
         let isActive = coordinator.renderer?.update(
             emissions: emissions,
             configuration: configuration,
