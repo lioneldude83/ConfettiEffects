@@ -105,7 +105,7 @@ final class ConfettiMetalRenderer: NSObject, MTKViewDelegate {
             renderDescriptor.colorAttachments[0].rgbBlendOperation = .add
             renderDescriptor.colorAttachments[0].alphaBlendOperation = .add
             renderDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-            renderDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+            renderDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
             renderDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
             renderDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
             self.pipelineState = try device.makeRenderPipelineState(descriptor: renderDescriptor)
