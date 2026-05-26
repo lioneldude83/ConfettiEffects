@@ -23,6 +23,9 @@ struct ConfettiInstance {
 
 struct Uniforms {
     float2 viewportSize;
+    float glintCircleOpacity;
+    float glintCircleScale;
+    float sparkleSharpness;
 };
 
 struct GPUConfettiParticle {
@@ -52,6 +55,9 @@ struct VertexOut {
     float2 localPosition;
     float opacity;
     uint shape;
+    float glintCircleOpacity;
+    float glintCircleScale;
+    float sparkleSharpness;
 };
 
 float confettiOpacity(float age, float lifetime) {
@@ -94,6 +100,9 @@ vertex VertexOut confettiVertex(
     out.localPosition = quadVertex.position * 2.0;
     out.opacity = instance.alpha;
     out.shape = instance.shape;
+    out.glintCircleOpacity = uniforms.glintCircleOpacity;
+    out.glintCircleScale = uniforms.glintCircleScale;
+    out.sparkleSharpness = uniforms.sparkleSharpness;
     return out;
 }
 
@@ -110,6 +119,20 @@ fragment float4 confettiFragment(VertexOut in [[stage_in]]) {
         float2 q = abs(in.localPosition) - float2(0.7, 0.7);
         float roundedDistance = length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - 0.3;
         edgeAlpha = 1.0 - smoothstep(-0.06, 0.02, roundedDistance);
+    } else if (in.shape == 3 || in.shape == 4) {
+        float2 p = abs(in.localPosition);
+        float verticalDiamond = (p.x * in.sparkleSharpness) + p.y;
+        float horizontalDiamond = p.x + (p.y * in.sparkleSharpness);
+        float sparkleDistance = min(verticalDiamond, horizontalDiamond);
+        float sparkleAlpha = 1.0 - smoothstep(0.92, 1.0, sparkleDistance);
+        
+        if (in.shape == 4) {
+            float distanceToCenter = length(in.localPosition / in.glintCircleScale);
+            float circleAlpha = 1.0 - smoothstep(0.9, 1.0, distanceToCenter);
+            edgeAlpha = max(circleAlpha * in.glintCircleOpacity, sparkleAlpha);
+        } else {
+            edgeAlpha = sparkleAlpha;
+        }
     }
     
     if (edgeAlpha <= 0.001 || in.opacity <= 0.001) {

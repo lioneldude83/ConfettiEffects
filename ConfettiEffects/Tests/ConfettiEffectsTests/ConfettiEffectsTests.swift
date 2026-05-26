@@ -7,6 +7,7 @@
 
 import CoreGraphics
 import Foundation
+import MetalKit
 import Testing
 @testable import ConfettiEffects
 
@@ -17,8 +18,16 @@ import Testing
         spread: .degrees(-30),
         initialVelocity: 300...520,
         drag: -2,
+        angularVelocity: -8...8,
         particleScale: -1,
+        sparkleSharpness: 8,
+        glintCircleOpacity: 2,
+        glintCircleScale: 2,
         shapes: []
+    )
+    let lowerBoundConfiguration = ConfettiConfiguration(
+        sparkleSharpness: 1,
+        glintCircleScale: 0.2
     )
     
     #expect(configuration.particleCount == 0)
@@ -26,8 +35,14 @@ import Testing
     #expect(configuration.spread == .degrees(0))
     #expect(configuration.initialVelocity == 300...520)
     #expect(configuration.drag == 0)
+    #expect(configuration.angularVelocity == -8...8)
     #expect(configuration.particleScale == 0)
+    #expect(configuration.sparkleSharpness == 5)
+    #expect(configuration.glintCircleOpacity == 1)
+    #expect(configuration.glintCircleScale == 1)
     #expect(configuration.shapes == ConfettiConfiguration.Shape.allCases)
+    #expect(lowerBoundConfiguration.sparkleSharpness == 1.5)
+    #expect(lowerBoundConfiguration.glintCircleScale == 0.5)
 }
 
 @Test func automaticBackendPrefersMetalWhenAvailable() {
@@ -88,6 +103,23 @@ import Testing
     )
 }
 
+@Test func explicitBackendModesResolveExpectedRenderers() {
+    let cpuConfiguration = ConfettiConfiguration(backend: .cpu)
+    let metalConfiguration = ConfettiConfiguration(backend: .metal)
+    
+    #expect(cpuConfiguration.resolvedBackend(isMetalAvailable: true) == .cpu)
+    #expect(cpuConfiguration.resolvedExecutionMode(isMetalAvailable: true) == .cpuCanvas)
+    #expect(metalConfiguration.resolvedBackend(isMetalAvailable: false) == .cpu)
+    #expect(metalConfiguration.resolvedExecutionMode(isMetalAvailable: false) == .cpuCanvas)
+    #expect(metalConfiguration.resolvedBackend(isMetalAvailable: true) == .metal)
+}
+
+@Test func simulationProducesNoParticlesForZeroParticleCount() {
+    let configuration = ConfettiConfiguration(particleCount: 0)
+    
+    #expect(ConfettiSimulation.makeBurst(configuration: configuration, seed: 1).isEmpty)
+}
+
 @Test func simulationProducesDeterministicBurst() {
     let configuration = ConfettiConfiguration(particleCount: 4, palette: .ocean, shapes: [.circle])
     
@@ -106,7 +138,7 @@ import Testing
     #expect(first.allSatisfy { $0.shape == .circle })
     #expect(first.allSatisfy { (1.1...configuration.lifetime).contains($0.lifetime) })
     #expect(first.allSatisfy { (0.2...configuration.drag).contains($0.drag) })
-    #expect(first.allSatisfy { (-8...8).contains($0.angularVelocity) })
+    #expect(first.allSatisfy { configuration.angularVelocity.contains($0.angularVelocity) })
 }
 
 @Test func simulationUsesRectangleWidthAndHeightRanges() {
@@ -141,6 +173,37 @@ import Testing
     #expect(particles.filter { $0.shape == .rectangle }.allSatisfy { $0.size == CGSize(width: 12, height: 20) })
 }
 
+@Test func simulationCanGenerateSparkleShapes() {
+    let configuration = ConfettiConfiguration(
+        particleCount: 8,
+        circleSize: 12...12,
+        sparkleSize: 18...18,
+        shapes: [.sparkle]
+    )
+    
+    let particles = ConfettiSimulation.makeBurst(configuration: configuration, seed: 15)
+    
+    #expect(particles.count == 8)
+    #expect(particles.allSatisfy { $0.shape == .sparkle })
+    #expect(particles.allSatisfy { $0.size == CGSize(width: 18, height: 18) })
+}
+
+@Test func simulationCanGenerateGlintShapes() {
+    let configuration = ConfettiConfiguration(
+        particleCount: 8,
+        sparkleSize: 18...18,
+        glintCircleOpacity: 0.35,
+        shapes: [.glint]
+    )
+    
+    let particles = ConfettiSimulation.makeBurst(configuration: configuration, seed: 16)
+    
+    #expect(configuration.glintCircleOpacity == 0.35)
+    #expect(particles.count == 8)
+    #expect(particles.allSatisfy { $0.shape == .glint })
+    #expect(particles.allSatisfy { $0.size == CGSize(width: 18, height: 18) })
+}
+
 @Test func particleScaleResizesGeneratedParticles() {
     let circleConfiguration = ConfettiConfiguration(
         particleCount: 4,
@@ -162,12 +225,157 @@ import Testing
     #expect(rectangleParticles.allSatisfy { $0.size == CGSize(width: 6, height: 10) })
 }
 
+@Test func configurationPreservesOrderedRanges() {
+    let configuration = ConfettiConfiguration(
+        initialVelocity: 300...520,
+        angularVelocity: -8...8,
+        circleSize: 8...14,
+        sparkleSize: 10...22,
+        rectangleSize: .init(width: 8...14, height: 12...22)
+    )
+    
+    #expect(configuration.initialVelocity == 300...520)
+    #expect(configuration.angularVelocity == -8...8)
+    #expect(configuration.circleSize == 8...14)
+    #expect(configuration.sparkleSize == 10...22)
+    #expect(configuration.rectangleSize.width == 8...14)
+    #expect(configuration.rectangleSize.height == 12...22)
+}
+
 @Test func configurationResolvesEmissionOrigin() {
     let configuration = ConfettiConfiguration(emissionOrigin: .topTrailing)
     
     let origin = configuration.resolvedOrigin(in: CGSize(width: 200, height: 120))
     
     #expect(origin == CGPoint(x: 200, y: 0))
+}
+
+@Test func burstPresetUsesRequestedOrigin() {
+    let configuration = ConfettiConfiguration.burst(from: .topLeading)
+    
+    #expect(configuration.emissionOrigin == .topLeading)
+    #expect(configuration.launchAngle == .degrees(-90))
+}
+
+@Test func cannonPresetUsesRequestedEdgeAndDefaultLaunchAngle() {
+    let top = ConfettiConfiguration.cannon(from: .top)
+    let bottom = ConfettiConfiguration.cannon(from: .bottom)
+    let leading = ConfettiConfiguration.cannon(from: .leading)
+    let trailing = ConfettiConfiguration.cannon(from: .trailing)
+    
+    #expect(top.emissionOrigin == .top)
+    #expect(top.launchAngle == .degrees(-90))
+    #expect(abs(top.spread.degrees - 24) < 0.0001)
+    #expect(top.initialVelocity == 320...560)
+    #expect(bottom.emissionOrigin == .bottom)
+    #expect(bottom.launchAngle == .degrees(-90))
+    #expect(leading.emissionOrigin == .leading)
+    #expect(leading.launchAngle == .degrees(-90))
+    #expect(trailing.emissionOrigin == .trailing)
+    #expect(trailing.launchAngle == .degrees(-90))
+}
+
+@Test func cannonPresetUsesCustomLaunchAngleSpreadAndVelocity() {
+    let configuration = ConfettiConfiguration.cannon(
+        from: .bottom,
+        launchAngle: .degrees(-90),
+        spread: .degrees(14),
+        initialVelocity: 420...720
+    )
+    
+    #expect(configuration.emissionOrigin == .bottom)
+    #expect(configuration.launchAngle == .degrees(-90))
+    #expect(configuration.spread == .degrees(14))
+    #expect(configuration.initialVelocity == 420...720)
+}
+
+@Test func namedPresetsUseDistinctShapeAndParticleProfiles() {
+    let success = ConfettiConfiguration.success()
+    let subtle = ConfettiConfiguration.subtle()
+    let sparkle = ConfettiConfiguration.sparkle()
+    let glint = ConfettiConfiguration.glint()
+    
+    #expect(success.particleCount > subtle.particleCount)
+    #expect(success.launchAngle == .degrees(-90))
+    #expect(subtle.launchAngle == .degrees(-90))
+    #expect(sparkle.launchAngle == .degrees(-90))
+    #expect(glint.launchAngle == .degrees(-90))
+    #expect(subtle.particleScale < 1)
+    #expect(sparkle.shapes.contains(.sparkle))
+    #expect(sparkle.palette == .sunrise)
+    #expect(glint.shapes == [.glint])
+    #expect(glint.palette == .ocean)
+}
+
+@Test func subtlePresetUsesCustomParticleParameters() {
+    let subtle = ConfettiConfiguration.subtle(
+        particleCount: 48,
+        lifetime: 1.2,
+        launchAngle: .degrees(-75),
+        spread: .degrees(42),
+        initialVelocity: 140...260,
+        particleScale: 0.6,
+        palette: .monochrome
+    )
+    
+    #expect(subtle.particleCount == 48)
+    #expect(subtle.lifetime == 1.2)
+    #expect(subtle.particleScale == 0.6)
+    #expect(subtle.launchAngle == .degrees(-75))
+    #expect(subtle.spread == .degrees(42))
+    #expect(subtle.initialVelocity == 140...260)
+    #expect(subtle.palette == .monochrome)
+    #expect(subtle.shapes == [.circle, .roundedRectangle])
+}
+
+@Test func sparklePresetUsesCustomParticleParameters() {
+    let sparkle = ConfettiConfiguration.sparkle(
+        particleCount: 120,
+        lifetime: 2.0,
+        launchAngle: .degrees(-80),
+        spread: .degrees(48),
+        initialVelocity: 200...360,
+        particleScale: 0.9,
+        sparkleSharpness: 4.2,
+        palette: .ocean
+    )
+    
+    #expect(sparkle.particleCount == 120)
+    #expect(sparkle.lifetime == 2.0)
+    #expect(sparkle.particleScale == 0.9)
+    #expect(sparkle.launchAngle == .degrees(-80))
+    #expect(sparkle.sparkleSharpness == 4.2)
+    #expect(abs(sparkle.spread.degrees - 48) < 0.0001)
+    #expect(sparkle.initialVelocity == 200...360)
+    #expect(sparkle.palette == .ocean)
+    #expect(sparkle.shapes == [.sparkle, .circle])
+}
+
+@Test func glintPresetUsesCustomParticleParameters() {
+    let glint = ConfettiConfiguration.glint(
+        particleCount: 120,
+        lifetime: 2.4,
+        launchAngle: .degrees(-70),
+        spread: .degrees(44),
+        initialVelocity: 240...420,
+        particleScale: 1.2,
+        sparkleSharpness: 3.8,
+        glintCircleOpacity: 0.35,
+        glintCircleScale: 0.7,
+        palette: .rainbow
+    )
+    
+    #expect(glint.particleCount == 120)
+    #expect(glint.lifetime == 2.4)
+    #expect(glint.particleScale == 1.2)
+    #expect(glint.launchAngle == .degrees(-70))
+    #expect(glint.sparkleSharpness == 3.8)
+    #expect(glint.spread == .degrees(44))
+    #expect(glint.initialVelocity == 240...420)
+    #expect(glint.palette == .rainbow)
+    #expect(glint.glintCircleOpacity == 0.35)
+    #expect(glint.glintCircleScale == 0.7)
+    #expect(glint.shapes == [.glint])
 }
 
 @Test func reduceMotionCanDisableConfetti() {
@@ -188,6 +396,7 @@ import Testing
         lifetime: 3.6,
         spread: .degrees(72),
         initialVelocity: 320...580,
+        angularVelocity: -10...10,
         backend: .automatic
     )
     
@@ -195,10 +404,19 @@ import Testing
     
     #expect(reduced.particleCount == 60)
     #expect(reduced.lifetime == 1.5)
-    #expect(reduced.spread == .degrees(35))
-    #expect(reduced.initialVelocity == 144...261)
-    #expect(reduced.backend == .cpu)
+    #expect(reduced.spread == .degrees(50))
+    #expect(reduced.initialVelocity == 176...319)
+    #expect(reduced.angularVelocity == -3.5...3.5)
+    #expect(reduced.backend == .automatic)
     #expect(reduced.reduceMotionBehavior == .automatic)
+}
+
+@Test func reduceMotionKeepsSmallNonzeroBurstsVisible() {
+    let configuration = ConfettiConfiguration(particleCount: 4)
+    
+    let reduced = configuration.adjustedForReduceMotion(true)
+    
+    #expect(reduced.particleCount == 18)
 }
 
 @Test func reduceMotionCanBeIgnored() {
@@ -238,7 +456,7 @@ import Testing
     
     #expect(
         emission.expirationDate(configuration: configuration)
-        == birthDate.addingTimeInterval(2.4)
+            == birthDate.addingTimeInterval(2.4)
     )
 }
 
@@ -262,6 +480,31 @@ import Testing
         shape: .rectangle,
         lifetime: 2,
         drag: 0
+    )
+    
+    #expect(
+        ConfettiSimulation.sample(
+            particle: particle,
+            elapsed: -0.1,
+            origin: .zero,
+            configuration: configuration
+        ) == nil
+    )
+    #expect(
+        ConfettiSimulation.sample(
+            particle: particle,
+            elapsed: 0,
+            origin: CGPoint(x: 10, y: 20),
+            configuration: configuration
+        )?.position == CGPoint(x: 10, y: 20)
+    )
+    #expect(
+        ConfettiSimulation.sample(
+            particle: particle,
+            elapsed: 2,
+            origin: .zero,
+            configuration: configuration
+        ) != nil
     )
     
     let risingSample = ConfettiSimulation.sample(
@@ -300,4 +543,35 @@ import Testing
             configuration: configuration
         ) == nil
     )
+}
+@MainActor
+@Test func metalRendererCanBuildPipelineAndAcceptEmission() throws {
+    guard ConfettiMetalRenderer.isSupported else {
+        return
+    }
+    
+    let view = MTKView(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
+    view.colorPixelFormat = .bgra8Unorm
+    view.framebufferOnly = false
+    
+    let renderer = try #require(ConfettiMetalRenderer(mtkView: view))
+    let configuration = ConfettiConfiguration(
+        particleCount: 8,
+        shapes: [.rectangle],
+        backend: .metal
+    )
+    let emission = ConfettiEmission(
+        id: 1,
+        birthDate: Date(),
+        particles: ConfettiSimulation.makeBurst(configuration: configuration, seed: 1)
+    )
+    
+    let isActive = renderer.update(
+        emissions: [emission],
+        configuration: configuration,
+        executionMode: .metalCPUSimulation,
+        canvasSize: CGSize(width: 200, height: 200)
+    )
+    
+    #expect(isActive)
 }

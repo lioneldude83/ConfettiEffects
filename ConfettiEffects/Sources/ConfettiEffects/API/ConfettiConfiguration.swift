@@ -127,6 +127,8 @@ public struct ConfettiConfiguration: Sendable, Equatable {
         case circle
         case rectangle
         case roundedRectangle
+        case sparkle
+        case glint
     }
     
     /// Controls how the effect responds when the system Reduce Motion setting is enabled.
@@ -150,12 +152,22 @@ public struct ConfettiConfiguration: Sendable, Equatable {
     public var gravity: Double
     /// Per-particle velocity damping applied every frame.
     public var drag: Double
+    /// Angular velocity range used for particle rotation.
+    public var angularVelocity: ClosedRange<Double>
     /// Multiplies all generated particle sizes.
     public var particleScale: Double
     /// Diameter range for circular particles.
     public var circleSize: ClosedRange<Double>
+    /// Diameter range for sparkle particles.
+    public var sparkleSize: ClosedRange<Double>
+    /// Controls how thin or sharp sparkle and glint star arms appear.
+    public var sparkleSharpness: Double
     /// Width and height ranges for rectangle-based particles.
     public var rectangleSize: ConfettiSize
+    /// Opacity of the circular backing layer used for glint particles.
+    public var glintCircleOpacity: Double
+    /// Scale of the circular backing layer relative to the sparkle layer for glint particles.
+    public var glintCircleScale: Double
     /// Relative origin point used to place the burst inside the modified view.
     public var emissionOrigin: UnitPoint
     /// Behavior used when the system Reduce Motion setting is enabled.
@@ -176,9 +188,14 @@ public struct ConfettiConfiguration: Sendable, Equatable {
     ///   - initialVelocity: Initial launch velocity range for generated particles.
     ///   - gravity: Downward acceleration applied every frame.
     ///   - drag: Per-particle velocity damping applied every frame.
+    ///   - angularVelocity: Angular velocity range used for particle rotation.
     ///   - particleScale: Multiplies all generated particle sizes.
     ///   - circleSize: Diameter range for circular particles.
+    ///   - sparkleSize: Diameter range for sparkle particles.
+    ///   - sparkleSharpness: Controls how thin or sharp sparkle and glint star arms appear.
     ///   - rectangleSize: Width and height ranges for rectangle-based particles.
+    ///   - glintCircleOpacity: Opacity of the circular backing layer used for glint particles.
+    ///   - glintCircleScale: Scale of the circular backing layer relative to the sparkle layer for glint particles.
     ///   - emissionOrigin: Relative origin point used to place the burst inside the modified view.
     ///   - reduceMotionBehavior: Behavior used when the system Reduce Motion setting is enabled.
     ///   - palette: Built-in color palette used for generated particles.
@@ -192,9 +209,14 @@ public struct ConfettiConfiguration: Sendable, Equatable {
         initialVelocity: ClosedRange<Double> = 240...480,
         gravity: Double = 680,
         drag: Double = 0.9,
+        angularVelocity: ClosedRange<Double> = -8...8,
         particleScale: Double = 1,
         circleSize: ClosedRange<Double> = 8...14,
+        sparkleSize: ClosedRange<Double> = 10...22,
+        sparkleSharpness: Double = 2.6,
         rectangleSize: ConfettiSize = ConfettiSize(),
+        glintCircleOpacity: Double = 0.2,
+        glintCircleScale: Double = 0.6,
         emissionOrigin: UnitPoint = .center,
         reduceMotionBehavior: ReduceMotionBehavior = .automatic,
         palette: Palette = .rainbow,
@@ -208,14 +230,285 @@ public struct ConfettiConfiguration: Sendable, Equatable {
         self.initialVelocity = min(initialVelocity.lowerBound, initialVelocity.upperBound)...max(initialVelocity.lowerBound, initialVelocity.upperBound)
         self.gravity = gravity
         self.drag = max(0, drag)
+        self.angularVelocity = min(angularVelocity.lowerBound, angularVelocity.upperBound)...max(angularVelocity.lowerBound, angularVelocity.upperBound)
         self.particleScale = max(0, particleScale)
         self.circleSize = min(circleSize.lowerBound, circleSize.upperBound)...max(circleSize.lowerBound, circleSize.upperBound)
+        self.sparkleSize = min(sparkleSize.lowerBound, sparkleSize.upperBound)...max(sparkleSize.lowerBound, sparkleSize.upperBound)
+        self.sparkleSharpness = min(max(sparkleSharpness, 1.5), 5)
         self.rectangleSize = rectangleSize
+        self.glintCircleOpacity = min(max(glintCircleOpacity, 0), 1)
+        self.glintCircleScale = min(max(glintCircleScale, 0.5), 1)
         self.emissionOrigin = emissionOrigin
         self.reduceMotionBehavior = reduceMotionBehavior
         self.palette = palette
         self.shapes = shapes.isEmpty ? Shape.allCases : shapes
         self.backend = backend
+    }
+}
+
+public extension ConfettiConfiguration {
+    /// Creates the default one-shot burst configuration from a specific point in the modified view.
+    /// - Parameters:
+    ///   - origin: Relative point where the burst starts inside the modified view.
+    ///   - particleCount: Number of particles generated per burst.
+    ///   - lifetime: Maximum visible lifetime for generated particles.
+    ///   - launchAngle: Base launch direction for the burst.
+    ///   - spread: Angular spread around the launch angle.
+    ///   - initialVelocity: Initial launch velocity range for generated particles.
+    ///   - gravity: Downward acceleration applied every frame.
+    ///   - palette: Built-in color palette used for generated particles.
+    ///   - shapes: Shapes available when generating particles.
+    /// - Returns: A configuration tuned for a balanced upward confetti burst.
+    static func burst(
+        from origin: UnitPoint = .center,
+        particleCount: Int = 180,
+        lifetime: TimeInterval = 2.4,
+        launchAngle: Angle = .degrees(-90),
+        spread: Angle = .degrees(86),
+        initialVelocity: ClosedRange<Double> = 240...480,
+        gravity: Double = 680,
+        palette: Palette = .rainbow,
+        shapes: [Shape] = [.rectangle, .roundedRectangle]
+    ) -> ConfettiConfiguration {
+        ConfettiConfiguration(
+            particleCount: particleCount,
+            lifetime: lifetime,
+            launchAngle: launchAngle,
+            spread: spread,
+            initialVelocity: initialVelocity,
+            gravity: gravity,
+            emissionOrigin: origin,
+            palette: palette,
+            shapes: shapes
+        )
+    }
+    
+    /// Creates a directional cannon configuration that emits confetti from one edge.
+    /// - Parameters:
+    ///   - edge: Edge where the cannon starts.
+    ///   - particleCount: Number of particles generated per burst.
+    ///   - lifetime: Maximum visible lifetime for generated particles.
+    ///   - launchAngle: Base launch direction for the cannon.
+    ///   - spread: Angular spread around the cannon's launch angle.
+    ///   - initialVelocity: Initial launch velocity range for generated particles.
+    ///   - gravity: Downward acceleration applied every frame.
+    ///   - palette: Built-in color palette used for generated particles.
+    ///   - shapes: Shapes available when generating particles.
+    /// - Returns: A configuration with its origin matched to `edge`.
+    static func cannon(
+        from edge: Edge,
+        particleCount: Int = 180,
+        lifetime: TimeInterval = 2.4,
+        launchAngle: Angle = .degrees(-90),
+        spread: Angle = .degrees(24),
+        initialVelocity: ClosedRange<Double> = 320...560,
+        gravity: Double = 680,
+        palette: Palette = .rainbow,
+        shapes: [Shape] = [.rectangle, .roundedRectangle]
+    ) -> ConfettiConfiguration {
+        switch edge {
+        case .top:
+            ConfettiConfiguration(
+                particleCount: particleCount,
+                lifetime: lifetime,
+                launchAngle: launchAngle,
+                spread: spread,
+                initialVelocity: initialVelocity,
+                gravity: gravity,
+                emissionOrigin: .top,
+                palette: palette,
+                shapes: shapes
+            )
+        case .bottom:
+            ConfettiConfiguration(
+                particleCount: particleCount,
+                lifetime: lifetime,
+                launchAngle: launchAngle,
+                spread: spread,
+                initialVelocity: initialVelocity,
+                gravity: gravity,
+                emissionOrigin: .bottom,
+                palette: palette,
+                shapes: shapes
+            )
+        case .leading:
+            ConfettiConfiguration(
+                particleCount: particleCount,
+                lifetime: lifetime,
+                launchAngle: launchAngle,
+                spread: spread,
+                initialVelocity: initialVelocity,
+                gravity: gravity,
+                emissionOrigin: .leading,
+                palette: palette,
+                shapes: shapes
+            )
+        case .trailing:
+            ConfettiConfiguration(
+                particleCount: particleCount,
+                lifetime: lifetime,
+                launchAngle: launchAngle,
+                spread: spread,
+                initialVelocity: initialVelocity,
+                gravity: gravity,
+                emissionOrigin: .trailing,
+                palette: palette,
+                shapes: shapes
+            )
+        }
+    }
+    
+    /// Creates a celebratory preset for successful actions, milestones, and completed tasks.
+    /// - Parameters:
+    ///   - particleCount: Number of particles generated per burst.
+    ///   - lifetime: Maximum visible lifetime for generated particles.
+    ///   - launchAngle: Base launch direction for the burst.
+    ///   - spread: Angular spread around the launch angle.
+    ///   - initialVelocity: Initial launch velocity range for generated particles.
+    ///   - gravity: Downward acceleration applied every frame.
+    ///   - palette: Built-in color palette used for generated particles.
+    ///   - shapes: Shapes available when generating particles.
+    /// - Returns: A configuration tuned for a higher-energy celebration.
+    static func success(
+        particleCount: Int = 150,
+        lifetime: TimeInterval = 2.3,
+        launchAngle: Angle = .degrees(-90),
+        spread: Angle = .degrees(92),
+        initialVelocity: ClosedRange<Double> = 280...520,
+        gravity: Double = 680,
+        palette: Palette = .rainbow,
+        shapes: [Shape] = [.roundedRectangle, .rectangle, .sparkle]
+    ) -> ConfettiConfiguration {
+        ConfettiConfiguration(
+            particleCount: particleCount,
+            lifetime: lifetime,
+            launchAngle: launchAngle,
+            spread: spread,
+            initialVelocity: initialVelocity,
+            gravity: gravity,
+            palette: palette,
+            shapes: shapes
+        )
+    }
+    
+    /// Creates a restrained preset for small interface confirmations and frequently repeated actions.
+    /// - Parameters:
+    ///   - particleCount: Number of particles generated per burst.
+    ///   - lifetime: Maximum visible lifetime for generated particles.
+    ///   - launchAngle: Base launch direction for the burst.
+    ///   - spread: Angular spread around the launch angle.
+    ///   - initialVelocity: Initial launch velocity range for generated particles.
+    ///   - gravity: Downward acceleration applied every frame.
+    ///   - particleScale: Multiplies all generated particle sizes.
+    ///   - palette: Built-in color palette used for generated particles.
+    ///   - shapes: Shapes available when generating particles.
+    /// - Returns: A subtle configuration using circle and rounded rectangle particles.
+    static func subtle(
+        particleCount: Int = 64,
+        lifetime: TimeInterval = 1.6,
+        launchAngle: Angle = .degrees(-90),
+        spread: Angle = .degrees(58),
+        initialVelocity: ClosedRange<Double> = 180...320,
+        gravity: Double = 540,
+        particleScale: Double = 0.72,
+        palette: Palette = .ocean,
+        shapes: [Shape] = [.circle, .roundedRectangle]
+    ) -> ConfettiConfiguration {
+        ConfettiConfiguration(
+            particleCount: particleCount,
+            lifetime: lifetime,
+            launchAngle: launchAngle,
+            spread: spread,
+            initialVelocity: initialVelocity,
+            gravity: gravity,
+            particleScale: particleScale,
+            palette: palette,
+            shapes: shapes
+        )
+    }
+    
+    /// Creates a bright preset that favors sparkle particles for lightweight celebratory accents.
+    /// - Parameters:
+    ///   - particleCount: Number of sparkle particles generated per burst.
+    ///   - lifetime: Maximum visible lifetime for generated particles.
+    ///   - launchAngle: Base launch direction for the burst.
+    ///   - spread: Angular spread around the launch angle.
+    ///   - initialVelocity: Initial launch velocity range for generated particles.
+    ///   - gravity: Downward acceleration applied every frame.
+    ///   - particleScale: Multiplies all generated particle sizes.
+    ///   - sparkleSharpness: Controls how thin or sharp sparkle star arms appear.
+    ///   - palette: Built-in color palette used for generated particles.
+    ///   - shapes: Shapes available when generating particles.
+    /// - Returns: A sparkle-focused configuration using sparkle and circle particles.
+    static func sparkle(
+        particleCount: Int = 96,
+        lifetime: TimeInterval = 2.1,
+        launchAngle: Angle = .degrees(-90),
+        spread: Angle = .degrees(66),
+        initialVelocity: ClosedRange<Double> = 220...390,
+        gravity: Double = 480,
+        particleScale: Double = 0.88,
+        sparkleSharpness: Double = 2.6,
+        palette: Palette = .sunrise,
+        shapes: [Shape] = [.sparkle, .circle]
+    ) -> ConfettiConfiguration {
+        ConfettiConfiguration(
+            particleCount: particleCount,
+            lifetime: lifetime,
+            launchAngle: launchAngle,
+            spread: spread,
+            initialVelocity: initialVelocity,
+            gravity: gravity,
+            particleScale: particleScale,
+            sparkleSharpness: sparkleSharpness,
+            palette: palette,
+            shapes: shapes
+        )
+    }
+    
+    /// Creates an ocean-colored preset that favors glint particles.
+    /// - Parameters:
+    ///   - particleCount: Number of glint particles generated per burst.
+    ///   - lifetime: Maximum visible lifetime for generated particles.
+    ///   - launchAngle: Base launch direction for the burst.
+    ///   - spread: Angular spread around the launch angle.
+    ///   - initialVelocity: Initial launch velocity range for generated particles.
+    ///   - gravity: Downward acceleration applied every frame.
+    ///   - particleScale: Multiplies all generated particle sizes.
+    ///   - sparkleSharpness: Controls how thin or sharp glint star arms appear.
+    ///   - glintCircleOpacity: Opacity of the circular backing layer used for glint particles.
+    ///   - glintCircleScale: Scale of the circular backing layer relative to the sparkle layer.
+    ///   - palette: Built-in color palette used for generated particles.
+    ///   - shapes: Shapes available when generating particles.
+    /// - Returns: A glint-focused configuration using glint particles.
+    static func glint(
+        particleCount: Int = 96,
+        lifetime: TimeInterval = 2.1,
+        launchAngle: Angle = .degrees(-90),
+        spread: Angle = .degrees(66),
+        initialVelocity: ClosedRange<Double> = 220...390,
+        gravity: Double = 480,
+        particleScale: Double = 0.88,
+        sparkleSharpness: Double = 2.6,
+        glintCircleOpacity: Double = 0.2,
+        glintCircleScale: Double = 0.6,
+        palette: Palette = .ocean,
+        shapes: [Shape] = [.glint]
+    ) -> ConfettiConfiguration {
+        ConfettiConfiguration(
+            particleCount: particleCount,
+            lifetime: lifetime,
+            launchAngle: launchAngle,
+            spread: spread,
+            initialVelocity: initialVelocity,
+            gravity: gravity,
+            particleScale: particleScale,
+            sparkleSharpness: sparkleSharpness,
+            glintCircleOpacity: glintCircleOpacity,
+            glintCircleScale: glintCircleScale,
+            palette: palette,
+            shapes: shapes
+        )
     }
 }
 
@@ -272,8 +565,8 @@ extension ConfettiConfiguration {
             }
             
             return liveParticleCount >= Self.automaticMetalParticleThreshold
-            ? .metalGPUSimulation
-            : .metalCPUSimulation
+                ? .metalGPUSimulation
+                : .metalCPUSimulation
         case .automatic:
             guard isMetalAvailable else {
                 return .cpuCanvas
@@ -313,11 +606,11 @@ extension ConfettiConfiguration {
             return configuration
         case .automatic:
             var configuration = self
-            configuration.particleCount = particleCount == 0 ? 0 : max(12, particleCount / 3)
+            configuration.particleCount = particleCount == 0 ? 0 : min(60, max(18, Int(Double(particleCount) * 0.6)))
             configuration.lifetime = min(lifetime, 1.5)
-            configuration.initialVelocity = scaledRange(initialVelocity, factor: 0.45)
-            configuration.spread = .degrees(min(spread.degrees, 35))
-            configuration.backend = .cpu
+            configuration.initialVelocity = scaledRange(initialVelocity, factor: 0.55)
+            configuration.angularVelocity = scaledRange(angularVelocity, factor: 0.35)
+            configuration.spread = .degrees(min(spread.degrees, 50))
             return configuration
         }
     }

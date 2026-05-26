@@ -29,6 +29,10 @@ extension ConfettiMetalView: UIViewRepresentable {
     func updateUIView(_ view: MTKView, context: Context) {
         update(view: view, coordinator: context.coordinator)
     }
+    
+    static func dismantleUIView(_ view: MTKView, coordinator: Coordinator) {
+        dismantle(view: view, coordinator: coordinator)
+    }
 }
 #elseif os(macOS)
 extension ConfettiMetalView: NSViewRepresentable {
@@ -42,6 +46,10 @@ extension ConfettiMetalView: NSViewRepresentable {
     
     func updateNSView(_ view: MTKView, context: Context) {
         update(view: view, coordinator: context.coordinator)
+    }
+    
+    static func dismantleNSView(_ view: MTKView, coordinator: Coordinator) {
+        dismantle(view: view, coordinator: coordinator)
     }
 }
 #endif
@@ -68,19 +76,32 @@ extension ConfettiMetalView {
         view.enableSetNeedsDisplay = false
         view.preferredFramesPerSecond = 60
         
+        // Keep the draw loop stopped until SwiftUI provides valid content to render.
         view.isPaused = true
         
         coordinator.renderer = ConfettiMetalRenderer(mtkView: view)
         
+        // Do not let renderer activity callbacks keep the platform view alive.
         coordinator.renderer?.onActivityChanged = { [weak view] isActive in
-            view?.isPaused = !isActive
+            Task { @MainActor [weak view] in
+                view?.isPaused = !isActive
+            }
         }
         view.delegate = coordinator.renderer
         return view
     }
     
     @MainActor
+    private static func dismantle(view: MTKView, coordinator: Coordinator) {
+        view.isPaused = true
+        view.delegate = nil
+        coordinator.renderer?.onActivityChanged = nil
+        coordinator.renderer = nil
+    }
+    
+    @MainActor
     private func update(view: MTKView, coordinator: Coordinator) {
+        // Skip rendering until SwiftUI reports a usable logical size and display scale.
         guard size.width > 0, size.height > 0,
               size.width.isFinite, size.height.isFinite,
               displayScale > 0, displayScale.isFinite else {

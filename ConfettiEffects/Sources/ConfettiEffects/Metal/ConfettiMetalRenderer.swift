@@ -52,6 +52,9 @@ final class ConfettiMetalRenderer: NSObject, MTKViewDelegate {
     
     private struct Uniforms {
         var viewportSize: SIMD2<Float>
+        var glintCircleOpacity: Float
+        var glintCircleScale: Float
+        var sparkleSharpness: Float
     }
     
     private struct ComputeUniforms {
@@ -82,7 +85,7 @@ final class ConfettiMetalRenderer: NSObject, MTKViewDelegate {
     private var lastTimestamp: CFTimeInterval = 0
     private var isActive = false
     
-    var onActivityChanged: (@MainActor (Bool) -> Void)?
+    var onActivityChanged: ((Bool) -> Void)?
     
     @MainActor
     init?(mtkView: MTKView) {
@@ -184,7 +187,10 @@ final class ConfettiMetalRenderer: NSObject, MTKViewDelegate {
         }
         
         var uniforms = Uniforms(
-            viewportSize: SIMD2(Float(canvasSize.width), Float(canvasSize.height))
+            viewportSize: SIMD2(Float(canvasSize.width), Float(canvasSize.height)),
+            glintCircleOpacity: Float(configuration.glintCircleOpacity),
+            glintCircleScale: Float(configuration.glintCircleScale),
+            sparkleSharpness: Float(configuration.sparkleSharpness)
         )
         
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
@@ -517,6 +523,10 @@ final class ConfettiMetalRenderer: NSObject, MTKViewDelegate {
             return 1
         case .roundedRectangle:
             return 2
+        case .sparkle:
+            return 3
+        case .glint:
+            return 4
         }
     }
     
@@ -526,10 +536,6 @@ final class ConfettiMetalRenderer: NSObject, MTKViewDelegate {
         }
         
         self.isActive = isActive
-        let onActivityChanged = self.onActivityChanged
-        
-        Task { @MainActor in
-            onActivityChanged?(isActive)
-        }
+        onActivityChanged?(isActive)
     }
 }

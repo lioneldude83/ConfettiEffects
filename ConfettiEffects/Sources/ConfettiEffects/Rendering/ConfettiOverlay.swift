@@ -52,6 +52,27 @@ private struct ConfettiCanvasOverlay: View {
         cornerRadius: 0.25,
         style: .continuous
     ).path(in: CGRect(x: -0.5, y: -0.5, width: 1, height: 1))
+    private static func sparklePath(sharpness: Double) -> Path {
+        var path = Path()
+        let innerOffset = 0.26 / sharpness
+        let points = [
+            CGPoint(x: 0, y: -0.5),
+            CGPoint(x: innerOffset, y: -innerOffset),
+            CGPoint(x: 0.5, y: 0),
+            CGPoint(x: innerOffset, y: innerOffset),
+            CGPoint(x: 0, y: 0.5),
+            CGPoint(x: -innerOffset, y: innerOffset),
+            CGPoint(x: -0.5, y: 0),
+            CGPoint(x: -innerOffset, y: -innerOffset),
+        ]
+        
+        path.move(to: points[0])
+        for point in points.dropFirst() {
+            path.addLine(to: point)
+        }
+        path.closeSubpath()
+        return path
+    }
     
     let emissions: [ConfettiEmission]
     let configuration: ConfettiConfiguration
@@ -81,15 +102,49 @@ private struct ConfettiCanvasOverlay: View {
                         transform = transform.rotated(by: sample.rotation.radians)
                         transform = transform.scaledBy(x: sample.size.width, y: sample.size.height)
                         
-                        var particleCanvas = canvas
-                        particleCanvas.opacity = sample.opacity
-                        particleCanvas.fill(
-                            path(for: particle.shape).applying(transform),
-                            with: .color(sample.color)
+                        drawParticle(
+                            particle.shape,
+                            sample: sample,
+                            transform: transform,
+                            in: canvas
                         )
                     }
                 }
             }
+        }
+    }
+    
+    private func drawParticle(
+        _ shape: ConfettiConfiguration.Shape,
+        sample: ConfettiParticleSample,
+        transform: CGAffineTransform,
+        in canvas: GraphicsContext
+    ) {
+        if shape == .glint {
+            var backingCanvas = canvas
+            backingCanvas.opacity = sample.opacity * configuration.glintCircleOpacity
+            let circleTransform = transform.scaledBy(
+                x: configuration.glintCircleScale,
+                y: configuration.glintCircleScale
+            )
+            backingCanvas.fill(
+                Self.circlePath.applying(circleTransform),
+                with: .color(sample.color)
+            )
+            
+            var sparkleCanvas = canvas
+            sparkleCanvas.opacity = sample.opacity
+            sparkleCanvas.fill(
+                Self.sparklePath(sharpness: configuration.sparkleSharpness).applying(transform),
+                with: .color(sample.color)
+            )
+        } else {
+            var particleCanvas = canvas
+            particleCanvas.opacity = sample.opacity
+            particleCanvas.fill(
+                path(for: shape).applying(transform),
+                with: .color(sample.color)
+            )
         }
     }
     
@@ -101,6 +156,8 @@ private struct ConfettiCanvasOverlay: View {
             return Self.rectanglePath
         case .roundedRectangle:
             return Self.roundedRectanglePath
+        case .sparkle, .glint:
+            return Self.sparklePath(sharpness: configuration.sparkleSharpness)
         }
     }
 }

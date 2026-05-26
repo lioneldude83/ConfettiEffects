@@ -28,7 +28,7 @@ enum ConfettiSimulation {
             let angle = generator.next(in: (baseAngle - halfSpread)...(baseAngle + halfSpread))
             let speed = generator.next(in: configuration.initialVelocity)
             let rotation = Angle.radians(generator.next(in: 0...(2 * .pi)))
-            let angularVelocity = generator.next(in: -8...8)
+            let angularVelocity = generator.next(in: configuration.angularVelocity)
             let colorIndex = Int(generator.next() % UInt64(paletteCount))
             let shapeIndex = Int(generator.next() % UInt64(shapes.count))
             let shape = shapes[shapeIndex]
@@ -123,6 +123,9 @@ enum ConfettiSimulation {
         switch shape {
         case .circle:
             let diameter = generator.next(in: configuration.circleSize) * configuration.particleScale
+            return CGSize(width: diameter, height: diameter)
+        case .sparkle, .glint:
+            let diameter = generator.next(in: configuration.sparkleSize) * configuration.particleScale
             return CGSize(width: diameter, height: diameter)
         case .rectangle, .roundedRectangle:
             return CGSize(
